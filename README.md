@@ -1,76 +1,71 @@
-# Csync - Chrome Extension
+# Csync
 
-Csync是一个Chrome扩展程序，用于在指定网站将Cookie从主窗口同步到无痕窗口，让你既能保持登录状态又不会留下浏览记录。
+Sync cookies and localStorage from normal window to incognito window, stay logged in while browsing privately.
 
-## 功能特性
+将 Cookie 和 localStorage 从普通窗口同步到无痕窗口，保持登录状态的同时不留浏览记录。
 
-- 🔄 自动同步Cookie到无痕窗口
-- 📋 可配置需要同步的网站列表
-- 🚀 支持子域名匹配
-- 🔒 安全的Cookie传输
-- 📱 简洁易用的界面
+## Features
 
-## 安装方法
+- Auto sync cookies and localStorage to incognito window
+- Configurable website whitelist
+- Subdomain matching support
+- First-visit detection (only syncs once per session)
+- Manual sync via right-click menu
 
-1. 下载或克隆此项目到本地
-2. 打开Chrome浏览器，进入 `chrome://extensions/`
-3. 开启"开发者模式"
-4. 点击"加载已解压的扩展程序"
-5. 选择项目文件夹
+## Install
 
-## 使用方法
+### From Release
 
-### 1. 配置网站列表
-- 点击扩展图标打开popup界面
-- 在输入框中输入域名（如 `example.com`）
-- 点击"添加"按钮
-- 支持添加多个网站
+1. Download the latest `.zip` from [Releases](https://github.com/NihilDigit/csync/releases)
+2. Unzip to a folder
+3. Open `chrome://extensions/`
+4. Enable "Developer mode"
+5. Click "Load unpacked" and select the folder
 
-### 2. 自动同步
-- 在无痕窗口中打开配置的网站
-- 扩展会自动检测并同步Cookie
-- 支持页面导航时的同步
+### From Source
 
-### 3. 手动同步
-- 右键点击页面，选择"同步当前网站Cookie到无痕窗口"
-- 或在开发者控制台中执行 `Csync.manualSync()`
-
-## 工作原理
-
-1. **监听标签页创建**：background script监听无痕窗口的标签页创建事件
-2. **域名匹配**：检查当前域名是否在配置列表中
-3. **Cookie获取**：从主窗口获取指定域名的所有Cookie
-4. **Cookie同步**：将Cookie设置到无痕窗口中
-5. **状态保持**：无痕窗口中的页面将保持登录状态
-
-## 安全说明
-
-- 只同步非httpOnly的Cookie（出于安全考虑）
-- 所有数据存储在本地，不上传到服务器
-- 支持子域名匹配，确保Cookie正确同步
-
-## 文件结构
-
+```bash
+git clone https://github.com/NihilDigit/csync.git
 ```
-csync/
-├── manifest.json          # 扩展配置文件
-├── background.js          # 后台脚本
-├── popup.html            # popup界面
-├── popup.js              # popup逻辑
-├── content.js            # 内容脚本
-├── icons/                # 图标目录
-└── README.md             # 说明文档
+Then load the folder in Chrome as above.
+
+## Usage
+
+1. Click the extension icon, add websites you want to sync (e.g. `example.com`)
+2. **Keep the website open in a normal window** (logged in)
+3. Open the same website in an incognito window
+4. Cookies and localStorage will sync automatically, page reloads once
+
+### Manual Sync
+
+- Right-click on page → "同步当前网站 Cookie 和 localStorage 到无痕窗口"
+- Or in page console: `Csync.manualSync()`
+
+### Debug
+
+In Service Worker console:
+```javascript
+CsyncDebug.showCache()           // View cached data
+CsyncDebug.getStatus('example.com')  // Check sync status
+CsyncDebug.forceSync('example.com')  // Force sync
 ```
 
-## 注意事项
+## How It Works
 
-- 某些网站的安全策略可能会限制Cookie同步
-- httpOnly的Cookie无法通过JavaScript同步
-- 建议在测试环境中验证同步效果
+1. Caches cookies from normal window on startup
+2. When incognito tab opens a configured site:
+   - Checks if already synced (compares cookie count)
+   - If not synced: copies cookies via Chrome API, sends localStorage via message to content script
+   - Reloads the tab once
+3. Subsequent tabs skip sync (already have cookies)
 
-## 开发说明
+## Permissions
 
-如需修改或扩展功能，请参考Chrome Extension API文档：
-- [Chrome Extension API](https://developer.chrome.com/docs/extensions/)
-- [Cookies API](https://developer.chrome.com/docs/extensions/reference/cookies/)
-- [Tabs API](https://developer.chrome.com/docs/extensions/reference/tabs/)
+- `cookies` - Read/write cookies
+- `tabs` - Detect incognito tabs
+- `storage` - Save website list
+- `<all_urls>` - Access all sites for localStorage sync
+
+## License
+
+MIT
