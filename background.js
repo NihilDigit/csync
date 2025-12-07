@@ -374,17 +374,36 @@ async function checkAndSync(domain, tabId) {
   const matchedWebsite = matchConfiguredDomain(domain);
   if (!matchedWebsite) return;
 
-  const now = Date.now();
-  const lastSync = lastSyncTime.get(domain) || 0;
+  // 检查无痕窗口是否已经有这个域名的 cookie
+  const incognitoStores = await getIncognitoStores();
+  if (incognitoStores.length === 0) return;
   
-  if (now - lastSync < SYNC_COOLDOWN) {
-    console.log(`Skipping sync for ${domain}: in cooldown`);
+  // 获取普通窗口缓存的 cookie 数量
+  const cachedCookies = await getCachedCookies(matchedWebsite);
+  const cachedCount = cachedCookies.length;
+  
+  // 获取无痕窗口当前的 cookie
+  const existingCookies = await chrome.cookies.getAll({ 
+    domain: matchedWebsite, 
+    storeId: incognitoStores[0].id 
+  });
+  
+  console.log(`[checkAndSync] ${domain}: cached=${cachedCount}, incognito=${existingCookies.length}`);
+  
+  // 如果无痕窗口的 cookie 数量已经接近缓存数量，说明已同步过
+  if (cachedCount > 0 && existingCookies.length >= cachedCount) {
+    console.log(`Skipping sync for ${domain}: already synced (${existingCookies.length}/${cachedCount})`);
     return;
   }
 
-  console.log(`Starting sync for ${domain}...`);
-  lastSyncTime.set(domain, now);
-  await syncToIncognito(matchedWebsite, true, tabId);
+  console.log(`First visit in incognito for ${domain}, syncing...`);
+  await syncToIncognito(matchedWebsite, false, tabId);
+  
+  // 第一次同步后，只刷新触发同步的这个标签
+  if (tabId) {
+    console.log(`Reloading tab ${tabId} after first sync`);
+    chrome.tabs.reload(tabId);
+  }
 }
 
 // 标签页创建监听
