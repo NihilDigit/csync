@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      width: 400px;
+      min-height: 500px;
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      background: #f8f9fa;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    
+    .header h1 {
+      margin: 0;
+      font-size: 18px;
+      color: #333;
+    }
+    
+    .header p {
+      margin: 4px 0 0 0;
+      font-size: 12px;
+      color: #666;
+    }
+    
+    .section {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    
+    .section-title {
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .current-site {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    
+    .current-site-url {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      word-break: break-all;
+    }
+    
+    .current-site-domain {
+      font-size: 12px;
+      opacity: 0.9;
+      margin-bottom: 12px;
+    }
+    
+    .btn {
+      border: none;
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: #007bff;
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      background: #0056b3;
+      transform: translateY(-1px);
+    }
+    
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+    
+    .btn-success:hover {
+      background: #1e7e34;
+      transform: translateY(-1px);
+    }
+    
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+    
+    .btn-danger:hover {
+      background: #c82333;
+    }
+    
+    .btn-sm {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    
+    .cookie-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 8px;
+    }
+    
+    .cookie-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 11px;
+    }
+    
+    .cookie-item:last-child {
+      border-bottom: none;
+    }
+    
+    .cookie-info {
+      flex: 1;
+      min-width: 0;
+    }
+    
+    .cookie-name {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 2px;
+    }
+    
+    .cookie-details {
+      color: #666;
+      font-size: 10px;
+    }
+    
+    .cookie-value {
+      color: #007bff;
+      font-family: monospace;
+      max-width: 100px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
+    .website-list {
+      max-height: 150px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 8px;
+    }
+    
+    .website-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .website-item:last-child {
+      border-bottom: none;
+    }
+    
+    .website-url {
+      flex: 1;
+      font-size: 12px;
+      color: #555;
+      word-break: break-all;
+    }
+    
+    .status {
+      text-align: center;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+    }
+    
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    
+    .status.info {
+      background: #d1ecf1;
+      color: #0c5460;
+    }
+    
+    .empty-state {
+      text-align: center;
+      color: #999;
+      font-size: 12px;
+      padding: 20px;
+    }
+    
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #666;
+    }
+    
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #007bff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+    }
+    
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    .action-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    
+    .action-buttons .btn {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🔄 Csync</h1>
+    <p>Cookie同步器 - 主窗口到无痕窗口</p>
+  </div>
+  
+  <!-- 当前网站信息 -->
+  <div class="section current-site">
+    <div class="section-title" style="color: white; margin-bottom: 16px;">
+      🌐 当前网站
+    </div>
+    <div id="currentSiteUrl" class="current-site-url">加载中...</div>
+    <div id="currentSiteDomain" class="current-site-domain">获取域名中...</div>
+    <div class="action-buttons">
+      <button id="addToCsyncBtn" class="btn btn-success">➕ 添加到Csync</button>
+      <button id="refreshCookiesBtn" class="btn btn-primary">🔄 刷新Cookie</button>
+      <button id="verifySyncBtn" class="btn btn-primary">🔍 验证同步</button>
+    </div>
+  </div>
+  
+  <!-- Cookie信息 -->
+  <div class="section">
+    <div class="section-title">
+      🍪 Cookie信息 (<span id="cookieCount">0</span>)
+    </div>
+    <div id="cookieList" class="cookie-list">
+      <div class="loading">
+        <div class="spinner"></div>
+        正在加载Cookie...
+      </div>
+    </div>
+  </div>
+  
+  <!-- 已配置网站 -->
+  <div class="section">
+    <div class="section-title">
+      📋 已配置网站 (<span id="configuredCount">0</span>)
+    </div>
+    <div id="websiteList" class="website-list">
+      <div class="empty-state">暂无配置网站</div>
+    </div>
+  </div>
+  
+  <!-- 同步验证结果 -->
+  <div id="syncResult" class="section" style="display: none;">
+    <div class="section-title">
+      🔍 同步验证结果
+    </div>
+    <div id="syncResultContent"></div>
+  </div>
+  
+  <!-- 状态信息 -->
+  <div id="statusMessage" class="status info" style="display: none;">
+    状态信息
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Csync Debug</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    .section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+    button { padding: 10px; margin: 5px; }
+    #output { background: #f5f5f5; padding: 10px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Csync Debug Tool</h1>
+  
+  <div class="section">
+    <h3>测试功能</h3>
+    <button onclick="testCookieAccess()">测试Cookie访问</button>
+    <button onclick="testStorage()">测试存储</button>
+    <button onclick="testPermissions()">测试权限</button>
+    <button onclick="clearOutput()">清空输出</button>
+  </div>
+  
+  <div class="section">
+    <h3>输出</h3>
+    <div id="output"></div>
+  </div>
+
+  <script>
+    function log(message) {
+      const output = document.getElementById('output');
+      output.textContent += new Date().toLocaleTimeString() + ': ' + message + '\n';
+    }
+
+    async function testCookieAccess() {
+      log('=== 测试Cookie访问 ===');
+      try {
+        if (chrome && chrome.cookies) {
+          const url = window.location.href;
+          const domain = window.location.hostname;
+          log('当前域名: ' + domain);
+          
+          const cookies = await chrome.cookies.getAll({ domain: domain });
+          log('找到Cookie数量: ' + cookies.length);
+          
+          cookies.forEach((cookie, index) => {
+            log(`Cookie ${index}: ${cookie.name} = ${cookie.value.substring(0, 20)}...`);
+          });
+        } else {
+          log('chrome.cookies API 不可用（这是正常的，在普通网页中无法访问）');
+          log('请使用扩展的Service Worker调试窗口查看Cookie操作');
+        }
+      } catch (error) {
+        log('Cookie访问错误: ' + error.message);
+      }
+    }
+
+    async function testStorage() {
+      log('=== 测试存储 ===');
+      try {
+        if (chrome && chrome.storage && chrome.storage.sync) {
+          // 测试写入
+          await chrome.storage.sync.set({ 'csync_test': 'test_value_' + Date.now() });
+          log('存储写入成功');
+          
+          // 测试读取
+          const result = await chrome.storage.sync.get(['csync_test', 'csync_websites']);
+          log('存储读取成功: ' + JSON.stringify(result));
+        } else {
+          log('chrome.storage API 不可用（这是正常的，在普通网页中无法访问）');
+        }
+      } catch (error) {
+        log('存储错误: ' + error.message);
+      }
+    }
+
+    async function testPermissions() {
+      log('=== 测试权限 ===');
+      try {
+        if (chrome && chrome.permissions) {
+          const permissions = await chrome.permissions.getAll();
+          log('当前权限: ' + JSON.stringify(permissions, null, 2));
+        } else {
+          log('chrome.permissions API 不可用（这是正常的，在普通网页中无法访问）');
+        }
+      } catch (error) {
+        log('权限检查错误: ' + error.message);
+      }
+    }
+
+    function clearOutput() {
+      document.getElementById('output').textContent = '';
+    }
+
+    // 页面加载时自动运行测试
+    window.addEventListener('load', () => {
+      log('Csync Debug Tool 已加载');
+      testPermissions();
+    });
+  </script>
+</body>
+</html>
