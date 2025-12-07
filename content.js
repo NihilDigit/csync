@@ -1,60 +1,176 @@
 // Csync Content Script
-// 在页面中提供额外的同步功能
+// 在页面中提供 Cookie 和 localStorage 同步功能
 
 (function() {
   'use strict';
   
-  // 检查是否在无痕窗口中
-  if (chrome.extension.inIncognitoContext) {
-    console.log('Csync: Running in incognito mode');
-    
-    // 监听来自background的消息
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message.type === 'sync_cookies') {
-        console.log('Csync: Received sync request for', message.domain);
-        // 可以在这里添加页面级别的同步逻辑
-      }
-    });
-    
-    // 页面加载完成后检查是否需要刷新以应用新的Cookie
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', checkAndRefresh);
-    } else {
-      checkAndRefresh();
-    }
-  }
+  const domain = window.location.hostname;
   
-  // 检查并刷新页面以应用Cookie
-  function checkAndRefresh() {
-    // 获取当前域名
-    const domain = window.location.hostname;
-    
-    // 检查是否在配置的网站列表中
-    chrome.storage.sync.get(['csync_websites'], (result) => {
-      const websites = result.csync_websites || [];
-      const shouldSync = websites.some(website => {
-        return domain === website || domain.endsWith('.' + website);
-      });
-      
-      if (shouldSync) {
-        console.log('Csync: Domain is configured for sync:', domain);
-        
-        // 可以在这里添加页面特定的逻辑
-        // 比如检查登录状态，如果未登录则提示用户
-      }
-    });
-  }
-  
-  // 提供手动同步的API
-  if (typeof window !== 'undefined') {
-    window.Csync = {
-      manualSync: function() {
-        const domain = window.location.hostname;
-        chrome.runtime.sendMessage({
-          type: 'manual_sync_request',
-          domain: domain
+  // ==================== 消息监听 ====================
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    // 获取 localStorage
+    if (message.type === 'get_localStorage') {
+      if (matchDomain(message.domain)) {
+        try {
+          const items = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key) {
+              items.push({
+                key: key,
+                value: localStorage.getItem(key)
+              });
+            }
+          }
+          console.log('Csync: Got localStorage items:', items.length);
+          sendResponse({ 
+            isOk: true, 
+            msg: 'get localStorage success',
+            result: items 
+          });
+        } catch (error) {
+          console.error('Csync: Failed to get localStorage:', error);
+          sendResponse({ 
+            isOk: false, 
+            msg: 'get localStorage error',
+            result: error.message 
+          });
+        }
+      } else {
+        sendResponse({ 
+          isOk: false, 
+          msg: 'domain not match' 
         });
       }
-    };
+      return true;
+    }
+    
+    // 设置 localStorage
+    if (message.type === 'set_localStorage') {
+      if (matchDomain(message.domain)) {
+        try {
+          const items = message.items || [];
+          let setCount = 0;
+          
+          for (const item of items) {
+            if (item.key) {
+              localStorage.setItem(item.key, item.value || '');
+              setCount++;
+            }
+          }
+          
+          console.log('Csync: Set localStorage items:', setCount);
+          sendResponse({ 
+            isOk: true, 
+            msg: `set ${setCount} localStorage items success` 
+          });
+        } catch (error) {
+          console.error('Csync: Failed to set localStorage:', error);
+          sendResponse({ 
+            isOk: false, 
+            msg: 'set localStorage error',
+            result: error.message 
+          });
+        }
+      } else {
+        sendResponse({ 
+          isOk: false, 
+          msg: 'domain not match' 
+        });
+      }
+      return true;
+    }
+    
+    // 手动同步请求的响应
+    if (message.type === 'sync_cookies') {
+      console.log('Csync: Received sync request for', message.domain);
+    }
+  });
+  
+  // ==================== 辅助函数 ====================
+  
+  // 检查域名是否匹配
+  function matchDomain(targetDomain) {
+    if (!targetDomain) return false;
+    return location.hostname === targetDomain || 
+           location.hostname.endsWith('.' + targetDomain) ||
+           targetDomain.endsWith('.' + location.hostname);
   }
+  
+  // 检查是否是配置的网站
+  function isConfiguredWebsite(websites) {
+    return websites.some(website => {
+      return domain === website || domain.endsWith('.' + website);
+    });
+  }
+  
+  // ==================== 初始化 ====================
+  
+  // 检查是否在无痕窗口中
+  const isIncognito = chrome.extension.inIncognitoContext;
+  
+  if (isIncognito) {
+    console.log('Csync: Running in incognito mode on', domain);
+  }
+  
+  // 页面加载完成后的处理
+  function onPageReady() {
+    chrome.storage.sync.get(['csync_websites'], (result) => {
+      const websites = result.csync_websites || [];
+      
+      if (isConfiguredWebsite(websites)) {
+        console.log('Csync: Domain is configured for sync:', domain);
+        
+        // 如果在无痕窗口，通知 background 页面已准备好接收 localStorage
+        if (isIncognito) {
+          chrome.runtime.sendMessage({
+            type: 'incognito_page_ready',
+            domain: domain,
+            url: location.href
+          });
+        }
+      }
+    });
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onPageReady);
+  } else {
+    onPageReady();
+  }
+  
+  // ==================== 公开 API ====================
+  
+  window.Csync = {
+    // 手动触发同步
+    manualSync: function() {
+      chrome.runtime.sendMessage({
+        type: 'manual_sync_request',
+        domain: domain
+      });
+    },
+    
+    // 获取当前页面的 localStorage（用于调试）
+    getLocalStorage: function() {
+      const items = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key) {
+          items.push({
+            key: key,
+            value: localStorage.getItem(key)
+          });
+        }
+      }
+      console.log('localStorage items:', items);
+      return items;
+    },
+    
+    // 检查是否在无痕模式
+    isIncognito: function() {
+      return isIncognito;
+    }
+  };
+  
+  console.log('Csync: Content script loaded for', domain);
 })();

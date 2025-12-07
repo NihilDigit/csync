@@ -1,11 +1,10 @@
 // Csync Background Script
-// 监听标签页创建，同步Cookie到无痕窗口
+// 监听标签页创建，同步 Cookie 和 localStorage 到无痕窗口
 // 借鉴 sync-your-cookie 项目的设计
 
 let configuredWebsites = [];
 
 // ==================== 防抖和批量处理 ====================
-// 记录域名最近一次同步时间，防止死循环刷新
 const lastSyncTime = new Map();
 const SYNC_COOLDOWN = 5000; // 5秒冷却时间
 
@@ -21,14 +20,12 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('Csync installed');
   loadWebsites();
   createContextMenus();
-  // 初始化时缓存配置网站的 cookies
-  setTimeout(initCookieCache, 500);
+  setTimeout(initCache, 500);
 });
 
 chrome.runtime.onStartup.addListener(() => {
   loadWebsites();
-  // 启动时也缓存 cookies
-  setTimeout(initCookieCache, 1000);
+  setTimeout(initCache, 1000);
 });
 
 // ==================== 消息处理 ====================
@@ -36,9 +33,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'websites_updated') {
     configuredWebsites = message.websites;
     console.log('Websites updated:', configuredWebsites);
-    // 配置更新后重新缓存
-    initCookieCache();
+    initCache();
     sendResponse({ success: true });
+    
   } else if (message.type === 'verify_sync') {
     verifyCookieSync(message.domain, message.currentCookies).then(result => {
       sendResponse({ success: true, data: result });
@@ -47,16 +44,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: false, error: error.message });
     });
     return true;
+    
   } else if (message.type === 'manual_sync_request') {
-    // 手动同步时强制刷新缓存并同步
     manualSync(message.domain);
     sendResponse({ success: true });
+    
   } else if (message.type === 'get_sync_status') {
-    // 获取同步状态
     getSyncStatus(message.domain).then(status => {
       sendResponse({ success: true, data: status });
     });
     return true;
+    
+  } else if (message.type === 'incognito_page_ready') {
+    // 无痕页面已准备好，可以设置 localStorage
+    handleIncognitoPageReady(message.domain, message.url, sender.tab);
+    sendResponse({ success: true });
   }
 });
 
@@ -70,7 +72,7 @@ function loadWebsites() {
 function createContextMenus() {
   chrome.contextMenus.create({
     id: 'csync_sync_current',
-    title: '同步当前网站Cookie到无痕窗口',
+    title: '同步当前网站 Cookie 和 localStorage 到无痕窗口',
     contexts: ['page']
   });
 }
@@ -86,21 +88,21 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// ==================== Cookie 缓存机制 ====================
+// ==================== 缓存机制（Cookie + localStorage）====================
 
-// 初始化 cookie 缓存 - 为所有配置的网站缓存 cookies
-async function initCookieCache() {
-  console.log('Initializing cookie cache for configured websites...');
+// 初始化缓存
+async function initCache() {
+  console.log('Initializing cache for configured websites...');
   for (const website of configuredWebsites) {
     await cacheCookiesForDomain(website);
+    // localStorage 需要从页面获取，在页面加载时触发
   }
-  console.log('Cookie cache initialized');
+  console.log('Cache initialized');
 }
 
-// 为指定域名缓存 cookies（从普通窗口读取）
+// 缓存 cookies
 async function cacheCookiesForDomain(domain) {
   try {
-    // 从普通窗口（storeId: '0'）获取 cookies
     const cookies = await chrome.cookies.getAll({ domain: domain, storeId: '0' });
     
     if (cookies.length === 0) {
@@ -108,8 +110,7 @@ async function cacheCookiesForDomain(domain) {
       return;
     }
 
-    // 将 cookies 存储到 local storage
-    const cacheKey = `csync_cache_${domain}`;
+    const cacheKey = `csync_cookie_${domain}`;
     const cacheData = {
       domain: domain,
       cookies: cookies,
@@ -124,10 +125,63 @@ async function cacheCookiesForDomain(domain) {
   }
 }
 
-// 从缓存获取 cookies
+// 缓存 localStorage（从普通窗口的标签页获取）
+async function cacheLocalStorageForDomain(domain) {
+  try {
+    // 查找普通窗口中该域名的标签页
+    const tabs = await chrome.tabs.query({});
+    const normalTab = tabs.find(tab => {
+      if (tab.incognito || !tab.url) return false;
+      try {
+        const tabHost = new URL(tab.url).hostname;
+        return tabHost === domain || tabHost.endsWith('.' + domain) || domain.endsWith('.' + tabHost);
+      } catch {
+        return false;
+      }
+    });
+    
+    if (!normalTab) {
+      console.log(`No normal tab found for ${domain} to get localStorage`);
+      return null;
+    }
+    
+    // 向该标签页请求 localStorage
+    return new Promise((resolve) => {
+      chrome.tabs.sendMessage(normalTab.id, {
+        type: 'get_localStorage',
+        domain: domain
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.log('Failed to get localStorage:', chrome.runtime.lastError.message);
+          resolve(null);
+          return;
+        }
+        
+        if (response && response.isOk) {
+          const cacheKey = `csync_localStorage_${domain}`;
+          const cacheData = {
+            domain: domain,
+            items: response.result,
+            timestamp: Date.now()
+          };
+          chrome.storage.local.set({ [cacheKey]: cacheData });
+          console.log(`Cached ${response.result.length} localStorage items for ${domain}`);
+          resolve(response.result);
+        } else {
+          resolve(null);
+        }
+      });
+    });
+    
+  } catch (error) {
+    console.error(`Failed to cache localStorage for ${domain}:`, error);
+    return null;
+  }
+}
+
+// 获取缓存的 cookies
 async function getCachedCookies(domain) {
-  // 尝试精确匹配
-  let cacheKey = `csync_cache_${domain}`;
+  let cacheKey = `csync_cookie_${domain}`;
   let result = await chrome.storage.local.get([cacheKey]);
   
   if (result[cacheKey]) {
@@ -137,7 +191,7 @@ async function getCachedCookies(domain) {
   // 尝试匹配父域名
   for (const website of configuredWebsites) {
     if (domain === website || domain.endsWith('.' + website)) {
-      cacheKey = `csync_cache_${website}`;
+      cacheKey = `csync_cookie_${website}`;
       result = await chrome.storage.local.get([cacheKey]);
       if (result[cacheKey]) {
         return result[cacheKey].cookies;
@@ -148,9 +202,31 @@ async function getCachedCookies(domain) {
   return [];
 }
 
+// 获取缓存的 localStorage
+async function getCachedLocalStorage(domain) {
+  let cacheKey = `csync_localStorage_${domain}`;
+  let result = await chrome.storage.local.get([cacheKey]);
+  
+  if (result[cacheKey]) {
+    return result[cacheKey].items;
+  }
+  
+  // 尝试匹配父域名
+  for (const website of configuredWebsites) {
+    if (domain === website || domain.endsWith('.' + website)) {
+      cacheKey = `csync_localStorage_${website}`;
+      result = await chrome.storage.local.get([cacheKey]);
+      if (result[cacheKey]) {
+        return result[cacheKey].items;
+      }
+    }
+  }
+  
+  return [];
+}
+
 // ==================== Cookie 变化监听（带防抖）====================
 
-// 检查域名是否匹配配置
 function matchConfiguredDomain(domain) {
   const cleanDomain = domain.startsWith('.') ? domain.substring(1) : domain;
   
@@ -164,7 +240,6 @@ function matchConfiguredDomain(domain) {
   return null;
 }
 
-// 监听 cookie 变化（借鉴 sync-your-cookie 的防抖设计）
 chrome.cookies.onChanged.addListener(async (changeInfo) => {
   const cookie = changeInfo.cookie;
   const domain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
@@ -174,44 +249,36 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
     return;
   }
   
-  // 检查是否是配置的网站
   const matchedWebsite = matchConfiguredDomain(domain);
   if (!matchedWebsite) {
     return;
   }
   
-  // 如果已经在等待超时，跳过
   if (cookieChangeTimer && cookieChangeTimeoutFlag) {
     return;
   }
   
-  // 清除之前的定时器
   if (cookieChangeTimer) {
     clearTimeout(cookieChangeTimer);
   }
   
-  // 记录变化的域名
   changedDomainSet.add(matchedWebsite);
   
-  // 设置新的防抖定时器
   cookieChangeTimer = setTimeout(async () => {
     cookieChangeTimeoutFlag = false;
     
     console.log('Processing cookie changes for:', Array.from(changedDomainSet));
     
-    // 批量处理所有变化的域名
     for (const website of changedDomainSet) {
       await cacheCookiesForDomain(website);
       
-      // 如果有无痕窗口打开，自动同步
       const incognitoStores = await getIncognitoStores();
       if (incognitoStores.length > 0) {
-        // 检查冷却时间
         const now = Date.now();
         const lastSync = lastSyncTime.get(website) || 0;
         if (now - lastSync >= SYNC_COOLDOWN) {
           console.log(`Auto-syncing ${website} to incognito after cookie change`);
-          await syncCookiesToIncognito(website, false);
+          await syncToIncognito(website, false);
         }
       }
     }
@@ -219,7 +286,6 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
     changedDomainSet.clear();
   }, DEBOUNCE_DELAY);
   
-  // 设置最大等待时间
   if (!cookieChangeTimeoutFlag) {
     setTimeout(() => {
       if (cookieChangeTimer) {
@@ -228,7 +294,6 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
         clearTimeout(cookieChangeTimer);
         cookieChangeTimer = null;
         
-        // 强制处理
         (async () => {
           for (const website of changedDomainSet) {
             await cacheCookiesForDomain(website);
@@ -240,7 +305,6 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
   }
 });
 
-// 获取无痕窗口的 cookie stores
 async function getIncognitoStores() {
   const cookieStores = await chrome.cookies.getAllCookieStores();
   return cookieStores.filter(store => store.id !== '0');
@@ -248,12 +312,22 @@ async function getIncognitoStores() {
 
 // ==================== 同步逻辑 ====================
 
+// 无痕页面准备好后的处理
+async function handleIncognitoPageReady(domain, url, tab) {
+  const matchedWebsite = matchConfiguredDomain(domain);
+  if (!matchedWebsite) return;
+  
+  console.log(`Incognito page ready: ${domain}`);
+  
+  // 尝试同步 localStorage
+  await syncLocalStorageToTab(matchedWebsite, tab);
+}
+
 // 检查并执行同步（用于标签页事件）
 async function checkAndSync(domain, tabId) {
   const matchedWebsite = matchConfiguredDomain(domain);
   if (!matchedWebsite) return;
 
-  // 检查冷却时间
   const now = Date.now();
   const lastSync = lastSyncTime.get(domain) || 0;
   
@@ -264,7 +338,7 @@ async function checkAndSync(domain, tabId) {
 
   console.log(`Starting sync for ${domain}...`);
   lastSyncTime.set(domain, now);
-  await syncCookiesToIncognito(matchedWebsite, true);
+  await syncToIncognito(matchedWebsite, true, tabId);
 }
 
 // 标签页创建监听
@@ -295,53 +369,85 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 async function manualSync(domain) {
   const matchedWebsite = matchConfiguredDomain(domain) || domain;
   
-  // 先更新缓存
+  // 更新缓存
   await cacheCookiesForDomain(matchedWebsite);
+  await cacheLocalStorageForDomain(matchedWebsite);
   
-  // 然后同步
-  await syncCookiesToIncognito(matchedWebsite, true);
+  // 同步
+  const result = await syncToIncognito(matchedWebsite, true);
   
   // 显示通知
-  const cookies = await chrome.cookies.getAll({ domain: matchedWebsite, storeId: '0' });
   chrome.notifications.create({
     type: 'basic',
     iconUrl: 'icons/icon48.png',
     title: 'Csync',
-    message: `已同步 ${cookies.length} 个 Cookie 到无痕窗口`
+    message: `已同步 ${result.cookiesSynced || 0} 个 Cookie 和 ${result.localStorageSynced || 0} 个 localStorage 项`
   });
 }
 
-// 核心同步函数
-async function syncCookiesToIncognito(domain, shouldReload = false) {
+// 核心同步函数 - Cookie + localStorage
+async function syncToIncognito(domain, shouldReload = false, specificTabId = null) {
+  const result = {
+    success: false,
+    cookiesSynced: 0,
+    localStorageSynced: 0
+  };
+  
   try {
     console.log('Starting sync for:', domain);
     
-    // 获取无痕窗口的 cookie stores
+    // 同步 Cookies
+    const cookieResult = await syncCookiesToIncognito(domain);
+    result.cookiesSynced = cookieResult.synced || 0;
+    
+    // 同步 localStorage
+    const localStorageResult = await syncLocalStorageToIncognito(domain, specificTabId);
+    result.localStorageSynced = localStorageResult.synced || 0;
+    
+    // 更新同步时间
+    lastSyncTime.set(domain, Date.now());
+    
+    // 刷新页面
+    if (shouldReload && (result.cookiesSynced > 0 || result.localStorageSynced > 0)) {
+      await reloadIncognitoTabs(domain);
+    }
+    
+    result.success = true;
+    console.log(`Sync completed: ${result.cookiesSynced} cookies, ${result.localStorageSynced} localStorage items`);
+    
+  } catch (error) {
+    console.error('Sync error:', error);
+    result.error = error.message;
+  }
+  
+  return result;
+}
+
+// 同步 Cookies 到无痕窗口
+async function syncCookiesToIncognito(domain) {
+  const result = { synced: 0, failed: 0 };
+  
+  try {
     const targetStores = await getIncognitoStores();
     
     if (targetStores.length === 0) {
-      console.log('No incognito window open, cookies are cached for later');
-      return { success: false, reason: 'no_incognito' };
+      console.log('No incognito window open');
+      return result;
     }
     
-    // 优先从普通窗口直接获取 cookies
+    // 获取 cookies
     let cookies = await chrome.cookies.getAll({ domain: domain, storeId: '0' });
     
-    // 如果普通窗口没有，尝试从缓存获取
     if (cookies.length === 0) {
-      console.log('No cookies in normal window, trying cache...');
       cookies = await getCachedCookies(domain);
     }
     
     if (cookies.length === 0) {
       console.log(`No cookies found for ${domain}`);
-      return { success: false, reason: 'no_cookies' };
+      return result;
     }
     
     console.log(`Found ${cookies.length} cookies to sync`);
-    
-    let syncedCount = 0;
-    let failedCount = 0;
     
     for (const cookie of cookies) {
       for (const store of targetStores) {
@@ -370,10 +476,9 @@ async function syncCookiesToIncognito(domain, shouldReload = false) {
           }
 
           await chrome.cookies.set(cookieDetails);
-          syncedCount++;
+          result.synced++;
           
         } catch (error) {
-          // Retry with simplified options
           try {
              const cleanDomain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
              await chrome.cookies.set({
@@ -383,40 +488,129 @@ async function syncCookiesToIncognito(domain, shouldReload = false) {
                 path: cookie.path,
                 storeId: store.id
              });
-             syncedCount++;
+             result.synced++;
           } catch (retryError) {
-             failedCount++;
-             console.error(`Failed to sync cookie ${cookie.name}:`, retryError.message);
+             result.failed++;
           }
         }
       }
     }
     
-    console.log(`Sync completed: ${syncedCount} synced, ${failedCount} failed`);
+  } catch (error) {
+    console.error('Cookie sync error:', error);
+  }
+  
+  return result;
+}
+
+// 同步 localStorage 到无痕窗口
+async function syncLocalStorageToIncognito(domain, specificTabId = null) {
+  const result = { synced: 0, failed: 0 };
+  
+  try {
+    // 先尝试从普通窗口获取最新的 localStorage
+    const freshItems = await cacheLocalStorageForDomain(domain);
     
-    // 更新同步时间
-    lastSyncTime.set(domain, Date.now());
+    // 获取 localStorage 数据
+    let items = freshItems || await getCachedLocalStorage(domain);
     
-    // 自动刷新相关的无痕标签页
-    if (shouldReload && syncedCount > 0) {
-      await reloadIncognitoTabs(domain);
+    if (!items || items.length === 0) {
+      console.log(`No localStorage items found for ${domain}`);
+      return result;
     }
     
-    return { success: true, synced: syncedCount, failed: failedCount };
+    console.log(`Found ${items.length} localStorage items to sync`);
+    
+    // 查找无痕窗口中该域名的标签页
+    const tabs = await chrome.tabs.query({ incognito: true });
+    const targetTabs = tabs.filter(tab => {
+      if (specificTabId && tab.id !== specificTabId) return false;
+      if (!tab.url) return false;
+      try {
+        const tabHost = new URL(tab.url).hostname;
+        return tabHost === domain || tabHost.endsWith('.' + domain) || domain.endsWith('.' + tabHost);
+      } catch {
+        return false;
+      }
+    });
+    
+    if (targetTabs.length === 0) {
+      console.log(`No incognito tabs found for ${domain}`);
+      return result;
+    }
+    
+    // 向每个目标标签页发送 localStorage
+    for (const tab of targetTabs) {
+      try {
+        await new Promise((resolve, reject) => {
+          chrome.tabs.sendMessage(tab.id, {
+            type: 'set_localStorage',
+            domain: domain,
+            items: items
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+              return;
+            }
+            if (response && response.isOk) {
+              result.synced = items.length;
+              resolve();
+            } else {
+              reject(new Error(response?.msg || 'Unknown error'));
+            }
+          });
+        });
+        console.log(`Synced localStorage to tab ${tab.id}`);
+      } catch (error) {
+        console.error(`Failed to sync localStorage to tab ${tab.id}:`, error.message);
+        result.failed++;
+      }
+    }
     
   } catch (error) {
-    console.error('Fatal sync error:', error);
-    return { success: false, reason: 'error', error: error.message };
+    console.error('localStorage sync error:', error);
+  }
+  
+  return result;
+}
+
+// 向特定标签页同步 localStorage
+async function syncLocalStorageToTab(domain, tab) {
+  if (!tab || !tab.id) return;
+  
+  const items = await getCachedLocalStorage(domain);
+  
+  if (!items || items.length === 0) {
+    // 尝试从普通窗口获取
+    const freshItems = await cacheLocalStorageForDomain(domain);
+    if (!freshItems || freshItems.length === 0) {
+      console.log(`No localStorage items to sync for ${domain}`);
+      return;
+    }
+  }
+  
+  const itemsToSync = items || await getCachedLocalStorage(domain);
+  
+  if (itemsToSync && itemsToSync.length > 0) {
+    chrome.tabs.sendMessage(tab.id, {
+      type: 'set_localStorage',
+      domain: domain,
+      items: itemsToSync
+    }, (response) => {
+      if (response && response.isOk) {
+        console.log(`Synced ${itemsToSync.length} localStorage items to incognito tab`);
+      }
+    });
   }
 }
 
 // 刷新无痕标签页
 async function reloadIncognitoTabs(domain) {
   console.log('Reloading incognito tabs for:', domain);
-  const tabs = await chrome.tabs.query({});
+  const tabs = await chrome.tabs.query({ incognito: true });
   
   for (const tab of tabs) {
-    if (tab.incognito && tab.url) {
+    if (tab.url) {
       try {
         const tabUrl = new URL(tab.url);
         if (tabUrl.hostname === domain || 
@@ -426,7 +620,7 @@ async function reloadIncognitoTabs(domain) {
           chrome.tabs.reload(tab.id);
         }
       } catch (e) {
-        // ignore invalid URLs
+        // ignore
       }
     }
   }
@@ -436,8 +630,7 @@ async function reloadIncognitoTabs(domain) {
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync' && changes.csync_websites) {
     configuredWebsites = changes.csync_websites.newValue || [];
-    // 配置变化时重新缓存
-    initCookieCache();
+    initCache();
   }
 });
 
@@ -447,15 +640,18 @@ async function getSyncStatus(domain) {
   const incognitoStores = await getIncognitoStores();
   const lastSync = lastSyncTime.get(domain);
   
-  const cacheKey = `csync_cache_${matchedWebsite || domain}`;
-  const cacheResult = await chrome.storage.local.get([cacheKey]);
+  const cookieCacheKey = `csync_cookie_${matchedWebsite || domain}`;
+  const localStorageCacheKey = `csync_localStorage_${matchedWebsite || domain}`;
+  const cacheResult = await chrome.storage.local.get([cookieCacheKey, localStorageCacheKey]);
   
   return {
     isConfigured: !!matchedWebsite,
     hasIncognito: incognitoStores.length > 0,
     lastSyncTime: lastSync || null,
-    cachedCookies: cacheResult[cacheKey]?.cookies?.length || 0,
-    cacheTimestamp: cacheResult[cacheKey]?.timestamp || null
+    cachedCookies: cacheResult[cookieCacheKey]?.cookies?.length || 0,
+    cachedLocalStorage: cacheResult[localStorageCacheKey]?.items?.length || 0,
+    cookieCacheTimestamp: cacheResult[cookieCacheKey]?.timestamp || null,
+    localStorageCacheTimestamp: cacheResult[localStorageCacheKey]?.timestamp || null
   };
 }
 
@@ -496,22 +692,38 @@ self.CsyncDebug = {
     console.log('Cookie Stores:', stores);
     return stores;
   },
+  
   showCache: async function() {
     const result = await chrome.storage.local.get(null);
     console.log('All cached data:', result);
     return result;
   },
+  
   clearCache: async function() {
     const keys = await chrome.storage.local.get(null);
-    const cacheKeys = Object.keys(keys).filter(k => k.startsWith('csync_cache_'));
+    const cacheKeys = Object.keys(keys).filter(k => 
+      k.startsWith('csync_cookie_') || k.startsWith('csync_localStorage_')
+    );
     await chrome.storage.local.remove(cacheKeys);
     console.log('Cache cleared:', cacheKeys);
   },
+  
   forceSync: async function(domain) {
     console.log('Force syncing:', domain);
-    return await syncCookiesToIncognito(domain, true);
+    return await syncToIncognito(domain, true);
   },
+  
   getStatus: async function(domain) {
     return await getSyncStatus(domain);
+  },
+  
+  // 手动获取某个域名的 localStorage
+  getLocalStorage: async function(domain) {
+    return await cacheLocalStorageForDomain(domain);
+  },
+  
+  // 手动同步 localStorage 到无痕窗口
+  syncLocalStorage: async function(domain) {
+    return await syncLocalStorageToIncognito(domain);
   }
 };
