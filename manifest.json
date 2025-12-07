@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "description": "在指定网站将Cookie从主窗口同步到无痕窗口，保持登录状态不留浏览记录",
   
+  "incognito": "spanning",
+  
   "permissions": [
     "cookies",
     "tabs",

@@ -128,22 +128,39 @@ async function cacheCookiesForDomain(domain) {
 // 缓存 localStorage（从普通窗口的标签页获取）
 async function cacheLocalStorageForDomain(domain) {
   try {
+    console.log(`[localStorage] Caching for domain: ${domain}`);
+    
     // 查找普通窗口中该域名的标签页
     const tabs = await chrome.tabs.query({});
-    const normalTab = tabs.find(tab => {
-      if (tab.incognito || !tab.url) return false;
+    const normalTabs = tabs.filter(t => !t.incognito && t.url);
+    console.log(`[localStorage] Checking ${normalTabs.length} normal tabs for match`);
+    
+    // Debug: 列出所有普通窗口的标签页
+    for (const tab of normalTabs) {
       try {
         const tabHost = new URL(tab.url).hostname;
-        return tabHost === domain || tabHost.endsWith('.' + domain) || domain.endsWith('.' + tabHost);
+        console.log(`[localStorage]   Tab ${tab.id}: ${tabHost} (match: ${domainMatches(tabHost, domain)})`);
+      } catch (e) {
+        console.log(`[localStorage]   Tab ${tab.id}: invalid URL`);
+      }
+    }
+    
+    const normalTab = normalTabs.find(tab => {
+      try {
+        const tabHost = new URL(tab.url).hostname;
+        return domainMatches(tabHost, domain);
       } catch {
         return false;
       }
     });
     
     if (!normalTab) {
-      console.log(`No normal tab found for ${domain} to get localStorage`);
+      console.log(`[localStorage] No normal tab found for ${domain}`);
       return null;
     }
+    
+    console.log(`[localStorage] Found matching tab: ${normalTab.id} - ${new URL(normalTab.url).hostname}`);
+    console.log(`[localStorage] Requesting localStorage from tab ${normalTab.id}`);
     
     // 向该标签页请求 localStorage
     return new Promise((resolve) => {
@@ -152,10 +169,12 @@ async function cacheLocalStorageForDomain(domain) {
         domain: domain
       }, (response) => {
         if (chrome.runtime.lastError) {
-          console.log('Failed to get localStorage:', chrome.runtime.lastError.message);
+          console.log('[localStorage] Failed to get:', chrome.runtime.lastError.message);
           resolve(null);
           return;
         }
+        
+        console.log('[localStorage] Response:', response);
         
         if (response && response.isOk) {
           const cacheKey = `csync_localStorage_${domain}`;
@@ -165,16 +184,17 @@ async function cacheLocalStorageForDomain(domain) {
             timestamp: Date.now()
           };
           chrome.storage.local.set({ [cacheKey]: cacheData });
-          console.log(`Cached ${response.result.length} localStorage items for ${domain}`);
+          console.log(`[localStorage] Cached ${response.result.length} items for ${domain}`);
           resolve(response.result);
         } else {
+          console.log('[localStorage] Response not ok:', response?.msg);
           resolve(null);
         }
       });
     });
     
   } catch (error) {
-    console.error(`Failed to cache localStorage for ${domain}:`, error);
+    console.error(`[localStorage] Failed to cache for ${domain}:`, error);
     return null;
   }
 }
@@ -231,13 +251,39 @@ function matchConfiguredDomain(domain) {
   const cleanDomain = domain.startsWith('.') ? domain.substring(1) : domain;
   
   for (const website of configuredWebsites) {
-    if (cleanDomain === website || 
-        cleanDomain.endsWith('.' + website) || 
-        website.endsWith('.' + cleanDomain)) {
+    if (domainMatches(cleanDomain, website)) {
       return website;
     }
   }
   return null;
+}
+
+// 通用域名匹配函数
+function domainMatches(host1, host2) {
+  if (!host1 || !host2) return false;
+  
+  // 清理域名
+  const clean1 = host1.startsWith('.') ? host1.substring(1) : host1;
+  const clean2 = host2.startsWith('.') ? host2.substring(1) : host2;
+  
+  // 精确匹配
+  if (clean1 === clean2) return true;
+  
+  // 子域名匹配
+  if (clean1.endsWith('.' + clean2)) return true;
+  if (clean2.endsWith('.' + clean1)) return true;
+  
+  // 根域名匹配 (比如 www.touchgal.io 和 touchgal.io)
+  const parts1 = clean1.split('.');
+  const parts2 = clean2.split('.');
+  
+  if (parts1.length >= 2 && parts2.length >= 2) {
+    const root1 = parts1.slice(-2).join('.');
+    const root2 = parts2.slice(-2).join('.');
+    if (root1 === root2) return true;
+  }
+  
+  return false;
 }
 
 chrome.cookies.onChanged.addListener(async (changeInfo) => {
@@ -508,6 +554,8 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
   const result = { synced: 0, failed: 0 };
   
   try {
+    console.log(`[localStorage] Starting sync for domain: ${domain}`);
+    
     // 先尝试从普通窗口获取最新的 localStorage
     const freshItems = await cacheLocalStorageForDomain(domain);
     
@@ -515,33 +563,41 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
     let items = freshItems || await getCachedLocalStorage(domain);
     
     if (!items || items.length === 0) {
-      console.log(`No localStorage items found for ${domain}`);
+      console.log(`[localStorage] No items found for ${domain}`);
       return result;
     }
     
-    console.log(`Found ${items.length} localStorage items to sync`);
+    console.log(`[localStorage] Found ${items.length} items to sync`);
     
     // 查找无痕窗口中该域名的标签页
-    const tabs = await chrome.tabs.query({ incognito: true });
-    const targetTabs = tabs.filter(tab => {
+    const allTabs = await chrome.tabs.query({});
+    const incognitoTabs = allTabs.filter(tab => tab.incognito);
+    console.log(`[localStorage] Found ${incognitoTabs.length} incognito tabs`);
+    
+    const targetTabs = incognitoTabs.filter(tab => {
       if (specificTabId && tab.id !== specificTabId) return false;
       if (!tab.url) return false;
       try {
         const tabHost = new URL(tab.url).hostname;
-        return tabHost === domain || tabHost.endsWith('.' + domain) || domain.endsWith('.' + tabHost);
+        const match = domainMatches(tabHost, domain);
+        console.log(`[localStorage] Tab ${tab.id} host: ${tabHost}, match: ${match}`);
+        return match;
       } catch {
         return false;
       }
     });
     
     if (targetTabs.length === 0) {
-      console.log(`No incognito tabs found for ${domain}`);
+      console.log(`[localStorage] No matching incognito tabs for ${domain}`);
       return result;
     }
+    
+    console.log(`[localStorage] Will sync to ${targetTabs.length} tabs`);
     
     // 向每个目标标签页发送 localStorage
     for (const tab of targetTabs) {
       try {
+        console.log(`[localStorage] Sending to tab ${tab.id}: ${tab.url}`);
         await new Promise((resolve, reject) => {
           chrome.tabs.sendMessage(tab.id, {
             type: 'set_localStorage',
@@ -549,9 +605,11 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
             items: items
           }, (response) => {
             if (chrome.runtime.lastError) {
+              console.error(`[localStorage] sendMessage error:`, chrome.runtime.lastError.message);
               reject(chrome.runtime.lastError);
               return;
             }
+            console.log(`[localStorage] Response from tab ${tab.id}:`, response);
             if (response && response.isOk) {
               result.synced = items.length;
               resolve();
@@ -560,15 +618,15 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
             }
           });
         });
-        console.log(`Synced localStorage to tab ${tab.id}`);
+        console.log(`[localStorage] Synced to tab ${tab.id}`);
       } catch (error) {
-        console.error(`Failed to sync localStorage to tab ${tab.id}:`, error.message);
+        console.error(`[localStorage] Failed to sync to tab ${tab.id}:`, error.message);
         result.failed++;
       }
     }
     
   } catch (error) {
-    console.error('localStorage sync error:', error);
+    console.error('[localStorage] Sync error:', error);
   }
   
   return result;
@@ -607,7 +665,8 @@ async function syncLocalStorageToTab(domain, tab) {
 // 刷新无痕标签页
 async function reloadIncognitoTabs(domain) {
   console.log('Reloading incognito tabs for:', domain);
-  const tabs = await chrome.tabs.query({ incognito: true });
+  const allTabs = await chrome.tabs.query({});
+  const tabs = allTabs.filter(tab => tab.incognito);
   
   for (const tab of tabs) {
     if (tab.url) {
