@@ -47,10 +47,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       await initCache();
       sendResponse({ success: true });
 
-    } else if (message.type === 'verify_sync') {
-      const result = await verifyCookieSync(message.domain, message.currentCookies);
-      sendResponse({ success: true, data: result });
-
     } else if (message.type === 'manual_sync_request') {
       await manualSync(message.domain);
       sendResponse({ success: true });
@@ -739,89 +735,3 @@ async function getSyncStatus(domain) {
     localStorageCacheTimestamp: cacheResult[localStorageCacheKey]?.timestamp || null
   };
 }
-
-// ==================== 验证同步结果 ====================
-async function verifyCookieSync(domain, currentCookies) {
-  const stores = await chrome.cookies.getAllCookieStores();
-  const incognitoStore = stores.find((s) => s.id !== '0');
-
-  let targetCookies = [];
-  if (incognitoStore) {
-    targetCookies = await chrome.cookies.getAll({ domain: domain, storeId: incognitoStore.id });
-  }
-
-  const matched = [];
-  const missing = [];
-  const extra = [];
-
-  currentCookies.forEach((currentCookie) => {
-    const found = targetCookies.find((c) => c.name === currentCookie.name);
-    if (found) matched.push(currentCookie);
-    else missing.push(currentCookie);
-  });
-
-  targetCookies.forEach((incognitoCookie) => {
-    const found = currentCookies.find((c) => c.name === incognitoCookie.name);
-    if (!found) {
-      extra.push({
-        name: incognitoCookie.name,
-        domain: incognitoCookie.domain,
-        path: incognitoCookie.path,
-        value: (incognitoCookie.value || '').substring(0, 20) + '...'
-      });
-    }
-  });
-
-  return {
-    currentCookies,
-    incognitoCookies: targetCookies,
-    matched,
-    missing,
-    extra,
-    syncRate:
-      currentCookies.length > 0 ? Math.round((matched.length / currentCookies.length) * 100) : 0
-  };
-}
-
-// ==================== 调试工具 ====================
-self.CsyncDebug = {
-  getStores: async function() {
-    const stores = await chrome.cookies.getAllCookieStores();
-    console.log('Cookie Stores:', stores);
-    return stores;
-  },
-  
-  showCache: async function() {
-    const result = await chrome.storage.local.get(null);
-    console.log('All cached data:', result);
-    return result;
-  },
-  
-  clearCache: async function() {
-    const keys = await chrome.storage.local.get(null);
-    const cacheKeys = Object.keys(keys).filter(k => 
-      k.startsWith('csync_cookie_') || k.startsWith('csync_localStorage_')
-    );
-    await chrome.storage.local.remove(cacheKeys);
-    console.log('Cache cleared:', cacheKeys);
-  },
-  
-  forceSync: async function(domain) {
-    console.log('Force syncing:', domain);
-    return await syncToIncognito(domain, true);
-  },
-  
-  getStatus: async function(domain) {
-    return await getSyncStatus(domain);
-  },
-  
-  // 手动获取某个域名的 localStorage
-  getLocalStorage: async function(domain) {
-    return await cacheLocalStorageForDomain(domain);
-  },
-  
-  // 手动同步 localStorage 到无痕窗口
-  syncLocalStorage: async function(domain) {
-    return await syncLocalStorageToIncognito(domain);
-  }
-};
