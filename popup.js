@@ -92,6 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
         toast(`Removed ${removed}`, 'info');
         updateAddButton();
         loadSites();
+        loadStatus();
       });
     });
   }
