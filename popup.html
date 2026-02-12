@@ -3,308 +3,176 @@
 <head>
   <meta charset="utf-8">
   <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      width: 400px;
-      min-height: 500px;
-      margin: 0;
-      padding: 16px;
+      width: 320px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 14px;
-      background: #f8f9fa;
+      font-size: 13px;
+      color: #1a1a1a;
+      background: #f5f5f7;
     }
-    
+
+    /* ---- Header ---- */
     .header {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    
-    .header h1 {
-      margin: 0;
-      font-size: 18px;
-      color: #333;
-    }
-    
-    .header p {
-      margin: 4px 0 0 0;
-      font-size: 12px;
-      color: #666;
-    }
-    
-    .section {
-      background: white;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-    
-    .section-title {
-      font-weight: 600;
-      margin-bottom: 12px;
-      color: #333;
+      padding: 14px 16px;
+      background: #1a1a1a;
+      color: #fff;
       display: flex;
       align-items: center;
-      gap: 8px;
+      justify-content: space-between;
     }
-    
-    .current-site {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
+    .header-left { display: flex; align-items: center; gap: 10px; }
+    .header-logo {
+      width: 26px; height: 26px;
+      background: #fff; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; color: #1a1a1a;
     }
-    
-    .current-site-url {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 8px;
-      word-break: break-all;
+    .header-title { font-size: 14px; font-weight: 600; }
+    .header-version { font-size: 11px; color: #666; }
+
+    /* ---- Site Card ---- */
+    .site-card {
+      margin: 12px 12px 0;
+      padding: 14px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }
-    
-    .current-site-domain {
-      font-size: 12px;
-      opacity: 0.9;
-      margin-bottom: 12px;
+    .site-domain {
+      font-size: 15px; font-weight: 600;
+      margin-bottom: 12px; word-break: break-all;
     }
-    
+    .site-actions { display: flex; gap: 8px; }
+
+    /* ---- Buttons ---- */
     .btn {
-      border: none;
-      border-radius: 6px;
-      padding: 10px 16px;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
+      border: none; border-radius: 8px; padding: 8px 14px;
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     }
-    
-    .btn-primary {
-      background: #007bff;
-      color: white;
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
+
+    .btn-add { background: #0071e3; color: #fff; flex: 1; }
+    .btn-add:hover:not(:disabled) { background: #0062cc; }
+    .btn-added { background: #e8f5e9; color: #2e7d32; flex: 1; }
+    .btn-added:hover { background: #c8e6c9; }
+
+    .btn-sync {
+      background: #f0f0f0; color: #333;
+      padding: 8px 12px;
     }
-    
-    .btn-primary:hover {
-      background: #0056b3;
-      transform: translateY(-1px);
+    .btn-sync:hover { background: #e4e4e4; }
+    .btn-sync svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+    /* ---- Status ---- */
+    .status-bar {
+      margin: 8px 12px 0;
+      padding: 8px 14px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 12px; color: #888;
     }
-    
-    .btn-success {
-      background: #28a745;
-      color: white;
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
     }
-    
-    .btn-success:hover {
-      background: #1e7e34;
-      transform: translateY(-1px);
+    .status-dot.ok { background: #4caf50; }
+    .status-dot.warn { background: #ff9800; }
+    .status-dot.off { background: #ccc; }
+
+    /* ---- Sites List ---- */
+    .sites-section {
+      margin: 12px;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }
-    
-    .btn-danger {
-      background: #dc3545;
-      color: white;
+    .sites-header {
+      padding: 10px 14px;
+      font-size: 11px; font-weight: 600; color: #888;
+      text-transform: uppercase; letter-spacing: 0.5px;
+      display: flex; align-items: center; justify-content: space-between;
     }
-    
-    .btn-danger:hover {
-      background: #c82333;
+    .sites-badge {
+      background: #f0f0f0; color: #555;
+      font-size: 11px; font-weight: 600;
+      padding: 1px 7px; border-radius: 10px;
     }
-    
-    .btn-sm {
-      padding: 6px 12px;
-      font-size: 12px;
-    }
-    
-    .cookie-list {
-      max-height: 200px;
-      overflow-y: auto;
-      border: 1px solid #e0e0e0;
-      border-radius: 4px;
-      padding: 8px;
-    }
-    
-    .cookie-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
+
+    .sites-list { padding: 0 14px 6px; }
+    .site-item {
+      display: flex; align-items: center; justify-content: space-between;
       padding: 8px 0;
-      border-bottom: 1px solid #f0f0f0;
-      font-size: 11px;
+      border-top: 1px solid #f0f0f0;
     }
-    
-    .cookie-item:last-child {
-      border-bottom: none;
+    .site-item:first-child { border-top: none; }
+    .site-name { font-size: 13px; color: #333; flex: 1; word-break: break-all; }
+    .site-remove {
+      background: none; border: none; cursor: pointer;
+      color: #ccc; padding: 4px; border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 0.15s;
     }
-    
-    .cookie-info {
-      flex: 1;
-      min-width: 0;
+    .site-remove:hover { color: #e53935; }
+    .site-remove svg { width: 14px; height: 14px; }
+
+    .empty { text-align: center; color: #bbb; font-size: 12px; padding: 16px 14px; }
+
+    /* ---- Toast ---- */
+    .toast {
+      position: fixed; bottom: 12px; left: 12px; right: 12px;
+      padding: 9px 14px; border-radius: 8px;
+      font-size: 12px; font-weight: 500; text-align: center;
+      transform: translateY(60px); opacity: 0;
+      transition: all 0.2s ease; z-index: 100;
     }
-    
-    .cookie-name {
-      font-weight: 600;
-      color: #333;
-      margin-bottom: 2px;
-    }
-    
-    .cookie-details {
-      color: #666;
-      font-size: 10px;
-    }
-    
-    .cookie-value {
-      color: #007bff;
-      font-family: monospace;
-      max-width: 100px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    
-    .website-list {
-      max-height: 150px;
-      overflow-y: auto;
-      border: 1px solid #e0e0e0;
-      border-radius: 4px;
-      padding: 8px;
-    }
-    
-    .website-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid #f0f0f0;
-    }
-    
-    .website-item:last-child {
-      border-bottom: none;
-    }
-    
-    .website-url {
-      flex: 1;
-      font-size: 12px;
-      color: #555;
-      word-break: break-all;
-    }
-    
-    .status {
-      text-align: center;
-      padding: 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      margin-top: 8px;
-    }
-    
-    .status.success {
-      background: #d4edda;
-      color: #155724;
-    }
-    
-    .status.error {
-      background: #f8d7da;
-      color: #721c24;
-    }
-    
-    .status.info {
-      background: #d1ecf1;
-      color: #0c5460;
-    }
-    
-    .empty-state {
-      text-align: center;
-      color: #999;
-      font-size: 12px;
-      padding: 20px;
-    }
-    
-    .loading {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      color: #666;
-    }
-    
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid #f3f3f3;
-      border-top: 2px solid #007bff;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-right: 8px;
-    }
-    
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-    
-    .action-buttons {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-    
-    .action-buttons .btn {
-      flex: 1;
-    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { background: #e8f5e9; color: #2e7d32; }
+    .toast.error { background: #fce4ec; color: #c62828; }
+    .toast.info { background: #e3f2fd; color: #1565c0; }
   </style>
 </head>
 <body>
   <div class="header">
-    <h1>🔄 Csync</h1>
-    <p>Cookie同步器 - 主窗口到无痕窗口</p>
+    <div class="header-left">
+      <div class="header-logo">C</div>
+      <span class="header-title">Csync</span>
+    </div>
+    <span class="header-version">v1.1.0</span>
   </div>
-  
-  <!-- 当前网站信息 -->
-  <div class="section current-site">
-    <div class="section-title" style="color: white; margin-bottom: 16px;">
-      🌐 当前网站
-    </div>
-    <div id="currentSiteUrl" class="current-site-url">加载中...</div>
-    <div id="currentSiteDomain" class="current-site-domain">获取域名中...</div>
-    <div class="action-buttons">
-      <button id="addToCsyncBtn" class="btn btn-success">➕ 添加到Csync</button>
-      <button id="refreshCookiesBtn" class="btn btn-primary">🔄 刷新Cookie</button>
-      <button id="verifySyncBtn" class="btn btn-primary">🔍 验证同步</button>
-    </div>
-  </div>
-  
-  <!-- Cookie信息 -->
-  <div class="section">
-    <div class="section-title">
-      🍪 Cookie信息 (<span id="cookieCount">0</span>)
-    </div>
-    <div id="cookieList" class="cookie-list">
-      <div class="loading">
-        <div class="spinner"></div>
-        正在加载Cookie...
-      </div>
+
+  <div class="site-card">
+    <div id="siteDomain" class="site-domain">Loading...</div>
+    <div class="site-actions">
+      <button id="addBtn" class="btn btn-add">Add to Csync</button>
+      <button id="syncBtn" class="btn btn-sync" title="Sync now">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+        Sync
+      </button>
     </div>
   </div>
-  
-  <!-- 已配置网站 -->
-  <div class="section">
-    <div class="section-title">
-      📋 已配置网站 (<span id="configuredCount">0</span>)
+
+  <div id="statusBar" class="status-bar">
+    <div id="statusDot" class="status-dot off"></div>
+    <span id="statusText">Open an incognito window to sync</span>
+  </div>
+
+  <div class="sites-section">
+    <div class="sites-header">
+      <span>Synced Sites</span>
+      <span id="sitesCount" class="sites-badge">0</span>
     </div>
-    <div id="websiteList" class="website-list">
-      <div class="empty-state">暂无配置网站</div>
+    <div id="sitesList" class="sites-list">
+      <div class="empty">No sites configured yet</div>
     </div>
   </div>
-  
-  <!-- 同步验证结果 -->
-  <div id="syncResult" class="section" style="display: none;">
-    <div class="section-title">
-      🔍 同步验证结果
-    </div>
-    <div id="syncResultContent"></div>
-  </div>
-  
-  <!-- 状态信息 -->
-  <div id="statusMessage" class="status info" style="display: none;">
-    状态信息
-  </div>
-  
+
+  <div id="toast" class="toast"></div>
   <script src="popup.js"></script>
 </body>
 </html>

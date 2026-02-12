@@ -101,7 +101,7 @@ function createContextMenus() {
   try {
     chrome.contextMenus.create({
       id: 'csync_sync_current',
-      title: '同步当前网站 Cookie 和 localStorage 到无痕窗口',
+      title: 'Sync cookies & localStorage to incognito',
       contexts: ['page']
     });
   } catch (e) {

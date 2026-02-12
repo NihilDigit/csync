@@ -48,9 +48,8 @@ Then load the cloned folder in Chrome as above.
 
 If you need to force a re-sync (e.g. after re-logging in the normal window):
 
-- Right-click on the page → "同步当前网站 Cookie 和 localStorage 到无痕窗口"
-
-A notification will confirm how many cookies and localStorage items were synced.
+- Click the Csync icon → "Sync" button
+- Or right-click on the page → "Sync cookies & localStorage to incognito"
 
 ### Important Notes
 
