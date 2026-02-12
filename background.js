@@ -1,16 +1,14 @@
 // Csync Background Script
-// 监听标签页创建，同步 Cookie 和 localStorage 到无痕窗口
 
 let configuredWebsites = [];
 let configuredWebsitesLoaded = false;
 let configuredWebsitesLoadingPromise = null;
 
-// ==================== 防抖和批量处理 ====================
+// ---- Debounce & batching ----
 const lastSyncTime = new Map();
 const SYNC_COOLDOWN = 5000;
 
-// MV3 service worker 可能在空闲时被挂起，用 chrome.alarms 代替 setTimeout
-// changedDomainSet 同时持久化到 storage.local，防止 worker 重启后丢失
+// Persisted to storage.local so pending domains survive service worker restarts
 const changedDomainSet = new Set();
 const CHANGED_DOMAINS_KEY = 'csync_pending_domains';
 const DEBOUNCE_DELAY_MS = 3000;
@@ -20,14 +18,14 @@ const COOKIE_MAXWAIT_ALARM = 'csync_cookie_maxwait';
 const INIT_CACHE_ALARM = 'csync_init_cache';
 let cookieDebounceScheduledAt = 0;
 
-// ==================== 初始化 ====================
+// ---- Init ----
 console.log('Csync service worker starting');
 
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Csync installed');
   loadWebsites();
   createContextMenus();
-  // 延迟初始化缓存，用 alarm 保证 MV3 下可靠触发
+  // Delay cache init via alarm for MV3 reliability
   chrome.alarms.create(INIT_CACHE_ALARM, { delayInMinutes: 0.01 });
 });
 
@@ -37,7 +35,7 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(INIT_CACHE_ALARM, { delayInMinutes: 0.02 });
 });
 
-// ==================== 消息处理 ====================
+// ---- Message handling ----
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     if (message.type === 'websites_updated') {
@@ -56,7 +54,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ success: true, data: status });
 
     } else if (message.type === 'incognito_page_ready') {
-      // 无痕页面已准备好，可以设置 localStorage
       await handleIncognitoPageReady(message.domain, message.url, sender.tab);
       sendResponse({ success: true });
     }
@@ -101,7 +98,7 @@ function createContextMenus() {
       contexts: ['page']
     });
   } catch (e) {
-    // 若重复创建会抛错（例如 service worker 重启时）
+    // May throw on duplicate creation (e.g. service worker restart)
     console.warn('Context menu create failed:', e);
   }
 }
@@ -117,9 +114,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// ==================== 缓存机制（Cookie + localStorage）====================
+// ---- Cache (cookies + localStorage) ----
 
-// 初始化缓存
 async function initCache() {
   await ensureWebsitesLoaded();
   if (configuredWebsites.length === 0) return;
@@ -129,7 +125,6 @@ async function initCache() {
   console.log('Cache initialized');
 }
 
-// 缓存 cookies
 async function cacheCookiesForDomain(domain) {
   try {
     const cookies = await chrome.cookies.getAll({ domain: domain, storeId: '0' });
@@ -154,7 +149,6 @@ async function cacheCookiesForDomain(domain) {
   }
 }
 
-// 缓存 localStorage（从普通窗口的标签页获取）
 async function cacheLocalStorageForDomain(domain) {
   try {
     const tabs = await chrome.tabs.query({});
@@ -202,7 +196,6 @@ async function cacheLocalStorageForDomain(domain) {
   }
 }
 
-// 获取缓存的 cookies
 async function getCachedCookies(domain) {
   let cacheKey = `csync_cookie_${domain}`;
   let result = await chrome.storage.local.get([cacheKey]);
@@ -211,7 +204,7 @@ async function getCachedCookies(domain) {
     return result[cacheKey].cookies;
   }
   
-  // 尝试匹配父域名
+  // Try parent domain match
   for (const website of configuredWebsites) {
     if (domain === website || domain.endsWith('.' + website)) {
       cacheKey = `csync_cookie_${website}`;
@@ -225,7 +218,6 @@ async function getCachedCookies(domain) {
   return [];
 }
 
-// 获取缓存的 localStorage
 async function getCachedLocalStorage(domain) {
   let cacheKey = `csync_localStorage_${domain}`;
   let result = await chrome.storage.local.get([cacheKey]);
@@ -234,7 +226,7 @@ async function getCachedLocalStorage(domain) {
     return result[cacheKey].items;
   }
   
-  // 尝试匹配父域名
+  // Try parent domain match
   for (const website of configuredWebsites) {
     if (domain === website || domain.endsWith('.' + website)) {
       cacheKey = `csync_localStorage_${website}`;
@@ -248,7 +240,7 @@ async function getCachedLocalStorage(domain) {
   return [];
 }
 
-// ==================== Cookie 变化监听（带防抖）====================
+// ---- Cookie change listener (debounced) ----
 
 async function matchConfiguredDomain(domain) {
   await ensureWebsitesLoaded();
@@ -263,10 +255,9 @@ async function matchConfiguredDomain(domain) {
   return null;
 }
 
-// 通用域名匹配函数
-// 匹配规则：精确匹配 或 其中一方是另一方的子域名
-// 例：www.example.com ↔ example.com ✓, a.example.com ↔ example.com ✓
-// 不做根域名猜测，避免 foo.co.uk 误匹配 bar.co.uk
+// Domain matching: exact or subdomain relationship
+// e.g. www.example.com <-> example.com, a.example.com <-> example.com
+// No root-domain guessing to avoid foo.co.uk matching bar.co.uk
 function domainMatches(host1, host2) {
   if (!host1 || !host2) return false;
 
@@ -284,7 +275,7 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
   const cookie = changeInfo.cookie;
   const domain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
 
-  // 只处理普通窗口的 cookie 变化
+  // Only handle normal-window cookie changes
   if (cookie.storeId !== '0') {
     return;
   }
@@ -295,19 +286,19 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
   }
 
   changedDomainSet.add(matchedWebsite);
-  // 持久化，防止 service worker 挂起后丢失
+  // Persist so pending domains survive service worker suspension
   await chrome.storage.local.set({
     [CHANGED_DOMAINS_KEY]: Array.from(changedDomainSet)
   });
 
-  // 每次变化都重置 debounce alarm
+  // Reset debounce alarm on each change
   cookieDebounceScheduledAt = Date.now();
   await chrome.alarms.clear(COOKIE_DEBOUNCE_ALARM);
   await chrome.alarms.create(COOKIE_DEBOUNCE_ALARM, {
     when: Date.now() + DEBOUNCE_DELAY_MS
   });
 
-  // max-wait alarm 只在第一次计划时设置
+  // Only set max-wait alarm on first schedule
   const maxWaitAlreadyScheduled = (await chrome.alarms.get(COOKIE_MAXWAIT_ALARM)) !== undefined;
   if (!maxWaitAlreadyScheduled) {
     await chrome.alarms.create(COOKIE_MAXWAIT_ALARM, {
@@ -317,7 +308,7 @@ chrome.cookies.onChanged.addListener(async (changeInfo) => {
 });
 
 async function processChangedDomains(reason) {
-  // 从持久化存储恢复（service worker 可能已重启）
+  // Restore from persistent storage (worker may have restarted)
   const stored = await chrome.storage.local.get([CHANGED_DOMAINS_KEY]);
   const persisted = stored[CHANGED_DOMAINS_KEY] || [];
   for (const d of persisted) changedDomainSet.add(d);
@@ -326,7 +317,7 @@ async function processChangedDomains(reason) {
     return;
   }
 
-  // 快照当前批次，处理期间新到的 domain 不会被误删
+  // Snapshot current batch; domains arriving during processing are preserved
   const domains = Array.from(changedDomainSet);
   console.log(`Processing cookie changes (${reason}) for:`, domains);
 
@@ -344,12 +335,12 @@ async function processChangedDomains(reason) {
     }
   }
 
-  // 只移除本批次处理过的 domain，保留处理期间新增的
+  // Only remove processed domains, keep new arrivals
   for (const d of domains) changedDomainSet.delete(d);
   cookieDebounceScheduledAt = 0;
 
   if (changedDomainSet.size > 0) {
-    // 还有未处理的新 domain，持久化并重新调度
+    // New domains pending, persist and reschedule
     await chrome.storage.local.set({
       [CHANGED_DOMAINS_KEY]: Array.from(changedDomainSet)
     });
@@ -384,33 +375,28 @@ async function getIncognitoStores() {
   return cookieStores.filter((store) => store.id !== '0');
 }
 
-// ==================== 同步逻辑 ====================
+// ---- Sync logic ----
 
-// 无痕页面准备好后的处理
 async function handleIncognitoPageReady(domain, url, tab) {
   const matchedWebsite = await matchConfiguredDomain(domain);
   if (!matchedWebsite) return;
   
   console.log(`Incognito page ready: ${domain}`);
   
-  // 尝试同步 localStorage
   await syncLocalStorageToTab(matchedWebsite, tab);
 }
 
-// 检查并执行同步（用于标签页事件）
 async function checkAndSync(domain, tabId) {
   const matchedWebsite = await matchConfiguredDomain(domain);
   if (!matchedWebsite) return;
 
-  // 检查无痕窗口是否已经有这个域名的 cookie
+  // Check if incognito already has cookies for this domain
   const incognitoStores = await getIncognitoStores();
   if (incognitoStores.length === 0) return;
   
-  // 获取普通窗口缓存的 cookie 数量
   const cachedCookies = await getCachedCookies(matchedWebsite);
   const cachedCount = cachedCookies.length;
   
-  // 获取无痕窗口当前的 cookie
   const existingCookies = await chrome.cookies.getAll({ 
     domain: matchedWebsite, 
     storeId: incognitoStores[0].id 
@@ -418,7 +404,7 @@ async function checkAndSync(domain, tabId) {
   
   console.log(`[checkAndSync] ${domain}: cached=${cachedCount}, incognito=${existingCookies.length}`);
   
-  // 如果无痕窗口的 cookie 数量已经接近缓存数量，说明已同步过
+  // Already synced if incognito cookie count >= cached count
   if (cachedCount > 0 && existingCookies.length >= cachedCount) {
     console.log(`Skipping sync for ${domain}: already synced (${existingCookies.length}/${cachedCount})`);
     return;
@@ -427,14 +413,13 @@ async function checkAndSync(domain, tabId) {
   console.log(`First visit in incognito for ${domain}, syncing...`);
   await syncToIncognito(matchedWebsite, false, tabId);
   
-  // 第一次同步后，只刷新触发同步的这个标签
+  // After first sync, only reload the triggering tab
   if (tabId) {
     console.log(`Reloading tab ${tabId} after first sync`);
     chrome.tabs.reload(tabId);
   }
 }
 
-// 标签页创建监听
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.incognito && tab.url && tab.url !== 'chrome://newtab/') {
     try {
@@ -448,7 +433,6 @@ chrome.tabs.onCreated.addListener((tab) => {
   }
 });
 
-// 标签页更新监听
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (tab.incognito && changeInfo.status === 'complete' && tab.url) {
     try {
@@ -462,27 +446,22 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-// 手动同步
 async function manualSync(domain) {
   const matchedWebsite = (await matchConfiguredDomain(domain)) || domain;
   
-  // 更新缓存
   await cacheCookiesForDomain(matchedWebsite);
   await cacheLocalStorageForDomain(matchedWebsite);
   
-  // 同步
   const result = await syncToIncognito(matchedWebsite, true);
   
-  // 显示通知
   chrome.notifications.create({
     type: 'basic',
     iconUrl: 'icons/icon48.png',
     title: 'Csync',
-    message: `已同步 ${result.cookiesSynced || 0} 个 Cookie 和 ${result.localStorageSynced || 0} 个 localStorage 项`
+    message: `Synced ${result.cookiesSynced || 0} cookies and ${result.localStorageSynced || 0} localStorage items`
   });
 }
 
-// 核心同步函数 - Cookie + localStorage
 async function syncToIncognito(domain, shouldReload = false, specificTabId = null) {
   const result = {
     success: false,
@@ -493,18 +472,14 @@ async function syncToIncognito(domain, shouldReload = false, specificTabId = nul
   try {
     console.log('Starting sync for:', domain);
     
-    // 同步 Cookies
     const cookieResult = await syncCookiesToIncognito(domain);
     result.cookiesSynced = cookieResult.synced || 0;
     
-    // 同步 localStorage
     const localStorageResult = await syncLocalStorageToIncognito(domain, specificTabId);
     result.localStorageSynced = localStorageResult.synced || 0;
     
-    // 更新同步时间
     lastSyncTime.set(domain, Date.now());
     
-    // 刷新页面
     if (shouldReload && (result.cookiesSynced > 0 || result.localStorageSynced > 0)) {
       await reloadIncognitoTabs(domain);
     }
@@ -520,7 +495,6 @@ async function syncToIncognito(domain, shouldReload = false, specificTabId = nul
   return result;
 }
 
-// 同步 Cookies 到无痕窗口
 async function syncCookiesToIncognito(domain) {
   const result = { synced: 0, failed: 0 };
   
@@ -532,7 +506,6 @@ async function syncCookiesToIncognito(domain) {
       return result;
     }
     
-    // 获取 cookies
     let cookies = await chrome.cookies.getAll({ domain: domain, storeId: '0' });
     
     if (cookies.length === 0) {
@@ -576,7 +549,7 @@ async function syncCookiesToIncognito(domain) {
           result.synced++;
 
         } catch (error) {
-          // 降级重试：只保留必要字段
+          // Fallback retry with minimal fields
           try {
             const cleanDomain = cookie.domain.startsWith('.') ? cookie.domain.substring(1) : cookie.domain;
             await chrome.cookies.set({
@@ -602,12 +575,10 @@ async function syncCookiesToIncognito(domain) {
   return result;
 }
 
-// 同步 localStorage 到无痕窗口
 async function syncLocalStorageToIncognito(domain, specificTabId = null) {
   const result = { synced: 0, failed: 0 };
 
   try {
-    // 先尝试从普通窗口获取最新的 localStorage
     const freshItems = await cacheLocalStorageForDomain(domain);
     const items = freshItems || await getCachedLocalStorage(domain);
 
@@ -615,7 +586,6 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
       return result;
     }
 
-    // 查找无痕窗口中该域名的标签页
     const allTabs = await chrome.tabs.query({});
     const targetTabs = allTabs.filter(tab => {
       if (!tab.incognito || !tab.url) return false;
@@ -631,7 +601,6 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
 
     console.log(`[localStorage] Syncing ${items.length} items to ${targetTabs.length} incognito tabs`);
 
-    // 向每个目标标签页发送 localStorage
     for (const tab of targetTabs) {
       try {
         await new Promise((resolve, reject) => {
@@ -664,7 +633,6 @@ async function syncLocalStorageToIncognito(domain, specificTabId = null) {
   return result;
 }
 
-// 向特定标签页同步 localStorage
 async function syncLocalStorageToTab(domain, tab) {
   if (!tab || !tab.id) return;
 
@@ -690,7 +658,6 @@ async function syncLocalStorageToTab(domain, tab) {
   });
 }
 
-// 刷新无痕标签页
 async function reloadIncognitoTabs(domain) {
   const allTabs = await chrome.tabs.query({});
 
@@ -706,7 +673,7 @@ async function reloadIncognitoTabs(domain) {
   }
 }
 
-// ==================== 存储变化监听 ====================
+// ---- Storage change listener ----
 chrome.storage.onChanged.addListener((changes, namespace) => {
   if (namespace === 'sync' && changes.csync_websites) {
     configuredWebsites = changes.csync_websites.newValue || [];
@@ -715,7 +682,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
   }
 });
 
-// ==================== 状态查询 ====================
+// ---- Status query ----
 async function getSyncStatus(domain) {
   const matchedWebsite = await matchConfiguredDomain(domain);
   const incognitoStores = await getIncognitoStores();
