@@ -4,12 +4,12 @@ Sync cookies and localStorage from normal windows to incognito, so you stay logg
 
 ## Features
 
-- Auto-syncs cookies and localStorage when you open a configured site in incognito
-- Configurable website whitelist — only syncs sites you explicitly add
-- Subdomain matching (e.g. adding `example.com` covers `www.example.com`)
-- Smart first-visit detection — only syncs once per incognito session, skips if already done
-- Manual sync via right-click context menu
-- MV3 service worker compatible — uses `chrome.alarms` for reliable background processing
+- **Instant incognito pre-warming**: copies whitelisted cookies the moment an incognito window opens, so the very first page request carries your login session without waiting or reloading
+- **Fast `document_start` localStorage injection**: caches origin-scoped `localStorage` snapshots in memory (`chrome.storage.session`) and injects them before page scripts run
+- **Real-time cookie sync**: propagates cookie updates and logouts from normal windows to incognito within sub-second debounce
+- **Configurable whitelist**: dynamically registers content scripts only on sites you explicitly add
+- **Subdomain support**: adding `example.com` covers `www.example.com`, `app.example.com`, and nested subdomains
+- **Manual sync**: force a fresh sync anytime via the popup or right-click context menu
 
 ## Install
 
@@ -18,7 +18,7 @@ Sync cookies and localStorage from normal windows to incognito, so you stay logg
 1. Download the latest `.zip` from [Releases](https://github.com/NihilDigit/csync/releases)
 2. Unzip to a folder
 3. Open `chrome://extensions/`
-4. Enable "Developer mode" (top right toggle)
+4. Enable "Developer mode"
 5. Click "Load unpacked" and select the unzipped folder
 
 ### From Source
@@ -39,43 +39,41 @@ Then load the cloned folder in Chrome as above.
 
 ### Browsing in Incognito
 
-1. Open an incognito window and navigate to the same site
-2. Csync automatically syncs cookies and localStorage from the normal window
-3. The page reloads once after the first sync — you should now be logged in
-4. Subsequent visits in the same incognito session skip the sync (already done)
+1. Open an incognito window — Csync immediately pre-warms cookies for all configured sites
+2. Navigate to any configured site — cookies and `localStorage` are already ready on first load
 
 ### Manual Sync
 
-If you need to force a re-sync (e.g. after re-logging in the normal window):
+If you need to force a re-sync (for example after switching accounts):
 
-- Click the Csync icon → "Sync" button
-- Or right-click on the page → "Sync cookies & localStorage to incognito"
-
-### Important Notes
-
-- The normal window tab for the site **must stay open** — localStorage can only be read from a live tab
-- Cookie changes in the normal window are automatically detected and synced to incognito (with a few seconds debounce)
-- Adding `example.com` also covers `www.example.com`, `app.example.com`, etc.
+- Click the Csync icon and select **Sync**
+- Or right-click on the page and select **Sync cookies and localStorage to incognito**
 
 ## How It Works
 
-1. On startup, caches cookies for all configured sites from the normal cookie store
-2. When an incognito tab navigates to a configured site:
-   - Compares cookie counts to detect if sync is needed
-   - Copies cookies to the incognito cookie store via `chrome.cookies` API
-   - Sends localStorage data to the incognito tab via content script messaging
-   - Reloads the tab once so the site picks up the new state
-3. Monitors `chrome.cookies.onChanged` with debounced batching to keep incognito in sync with ongoing cookie changes
+1. When an incognito window opens (`chrome.windows.onCreated`), Csync immediately copies cookies for all configured sites from the normal cookie store into the incognito store in parallel
+2. Normal-window tabs on whitelisted sites keep their origin `localStorage` snapshot warm in memory (`chrome.storage.session`), which incognito tabs read directly at `document_start` before page scripts execute
+3. For cold-start "Open link in incognito window" navigations, Csync intercepts during the early `loading` stage rather than waiting for full page completion
+4. `chrome.cookies.onChanged` mirrors cookie updates and removals to open incognito stores using fast in-memory debouncing with an MV3 `chrome.alarms` sleep fallback
 
 ## Permissions
 
 | Permission | Why |
 |---|---|
-| `cookies` | Read cookies from normal window, write them to incognito |
-| `tabs` | Detect incognito tabs and find matching normal tabs for localStorage |
-| `storage` | Persist the website whitelist and cookie cache |
-| `alarms` | Reliable debounce timing in MV3 service workers |
-| `<all_urls>` | Content script access for localStorage sync on any configured site |
+| `cookies` | Read cookies from normal windows and write or remove them in incognito |
+| `tabs` | Detect incognito navigations and locate matching normal tabs |
+| `storage` | Persist the website whitelist in `storage.sync` and keep transient session snapshots in memory (`storage.session`) |
+| `scripting` | Dynamically register content scripts only for whitelisted sites and capture `localStorage` from already-open tabs |
+| `contextMenus` | Provide the right-click manual sync action |
+| `notifications` | Report manual sync outcomes triggered from the context menu |
+| `alarms` | Reliable MV3 service worker fallback timer for debounced cookie sync |
+| `<all_urls>` | Read and write cookies and `localStorage` for any site you add to the whitelist |
+
+## Development & Tests
+
+```bash
+bun test
+```
 
 ## License
 
